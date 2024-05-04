@@ -34,7 +34,7 @@ impl Mapping {
 
         Ok(Mapping {
             output_type,
-            marshaler: MarshalAttr::self_type(),
+            marshaler: MarshalAttr::self_type(parent),
         })
     }
 }

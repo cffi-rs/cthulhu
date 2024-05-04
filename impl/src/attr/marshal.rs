@@ -30,9 +30,9 @@ impl Debug for MarshalAttr {
 }
 
 impl MarshalAttr {
-    pub fn self_type() -> Option<MarshalAttr> {
+    pub fn self_type(ty: &syn::Type) -> Option<MarshalAttr> {
         Some(MarshalAttr {
-            path: syn::parse2(quote! { ::cffi::BoxMarshaler }).unwrap(),
+            path: syn::parse2(quote! { ::cffi::ArcRefMarshaler::<#ty> }).unwrap(),
             types: vec![],
         })
     }
@@ -115,24 +115,21 @@ impl MarshalAttr {
             return Ok(None);
         }
 
-        let list = attr.meta.require_list()?;
+        if let Ok(list) = attr.meta.require_list() {
+            let marshal_ty: syn::Type = match syn::parse2(list.tokens.clone()) {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            };
 
-        let marshal_ty: syn::Type = match syn::parse2(list.tokens.clone()) {
-            Ok(v) => v,
-            Err(e) => return Err(e),
-        };
-
-        match marshal_ty {
-            syn::Type::Paren(path) => match *path.elem {
+            match marshal_ty {
                 syn::Type::Path(path) => Self::from_path(path.path),
                 syn::Type::BareFn(bare_fn) => Self::from_bare_fn(bare_fn),
                 e => {
                     return Err(syn::Error::new_spanned(e, "Must be a path"));
                 }
-            },
-            e => {
-                return Err(syn::Error::new_spanned(e, "Must be a path"));
             }
+        } else {
+            unreachable!("Shouldn't be here")
         }
     }
 }

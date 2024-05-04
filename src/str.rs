@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use super::null_ptr_error;
 use super::{FromForeign, InputType, ReturnType, Slice, ToForeign};
 
-pub struct StrMarshaler<'a>(&'a PhantomData<()>);
+pub struct StrMarshaler<'a>(PhantomData<&'a ()>);
 
 impl InputType for StrMarshaler<'_> {
     type Foreign = Slice<u8>;

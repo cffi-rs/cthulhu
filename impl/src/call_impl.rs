@@ -1,9 +1,12 @@
+use darling::ast::NestedMeta;
+use darling::{FromAttributes, FromMeta};
 use heck::ToSnakeCase as _;
 use log::debug;
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 
 use super::{function::Function, function::InnerFn, return_type::ReturnType};
+use crate::attr::invoke::InvokeParams;
 use crate::attr::marshal::MarshalAttr;
 use crate::attr::SignatureExt;
 
@@ -74,36 +77,48 @@ pub(crate) fn call_with_impl(
 
             let mappings = x.sig.drain_mappings(Some(&*self_ty))?;
 
+            debug!("mappings {:?}", mappings);
             debug!("impl fn {}", quote! { #fn_path });
             debug!("impl fn def: {}", quote! { #x });
 
             let mut attrs = vec![];
             std::mem::swap(&mut attrs, &mut x.attrs);
 
-            let mut idents = attrs
-                .into_iter()
-                .filter_map(|item| {
-                    debug!("attr {}", quote! { #item });
-                    match MarshalAttr::from_attribute(item.clone()) {
-                        Ok(None) => {
-                            x.attrs.push(item);
-                            return None;
-                        }
-                        Ok(Some(v)) => Some(Ok(v)),
-                        Err(e) => return Some(Err(e)),
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            debug!("attrs {:?}", attrs);
 
-            let attr = idents.pop();
+            // let mut idents = attrs
+            //     .iter()
+            //     .filter_map(|item| {
+            //         debug!("attr {}", quote! { #item });
+            //         match MarshalAttr::from_attribute(item.clone()) {
+            //             Ok(None) => {
+            //                 x.attrs.push(item.clone());
+            //                 return None;
+            //             }
+            //             Ok(Some(v)) => Some(Ok(v)),
+            //             Err(e) => return Some(Err(e)),
+            //         }
+            //     })
+            //     .collect::<Result<Vec<_>, _>>()?;
 
+            let invoke_params = 
+                InvokeParams::from_attributes(&attrs)?;
+
+            // let invoke_params = InvokeParams::from_list(
+            //     &attrs
+            //         .into_iter()
+            //         .map(|x| NestedMeta::Meta(x.meta))
+            //         .collect::<Vec<_>>(),
+            // )?;
+
+            debug!("invoke_params {:?}", invoke_params);
             let syn::Signature {
                 inputs: params,
                 output: local_return_type,
                 ..
             } = x.sig.clone();
 
-            let fn_marshal_attr = match attr.map(|x| x.path) {
+            let fn_marshal_attr = match invoke_params.return_marshaler {
                 Some(p) => MarshalAttr::from_path(p)?,
                 None => MarshalAttr::from_defaults_by_return_type(&local_return_type),
             };

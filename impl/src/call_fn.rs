@@ -34,7 +34,7 @@ pub fn call_with_function(
         meta: syn::Meta::List(syn::MetaList {
             path: syn::parse2(quote! { inline }).unwrap(),
             delimiter: syn::MacroDelimiter::Paren(Paren::default()),
-            tokens: quote! { (always) },
+            tokens: quote! { always },
         }),
     };
     fn_item.attrs.push(attr);

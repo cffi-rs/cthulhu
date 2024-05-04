@@ -33,12 +33,22 @@ pub fn marshal(
         Err(err) => return err.write_errors().into(),
     };
 
-    match call_with(params, function.into()) {
+    let has_return = params.return_marshaler.is_some();
+
+    let result = match call_with(params, function.into()) {
         Ok(tokens) => tokens.into(),
-        Err(err) => proc_macro::TokenStream::from(
-            syn::Error::new(err.span(), err.to_string()).to_compile_error(),
-        ),
+        Err(err) => {
+            return proc_macro::TokenStream::from(
+                syn::Error::new(err.span(), err.to_string()).to_compile_error(),
+            )
+        }
+    };
+
+    if has_return {
+        println!("{}", result);
     }
+
+    result
 }
 
 #[ctor]
@@ -116,7 +126,6 @@ fn call_with(invoke_params: InvokeParams, item: TokenStream) -> Result<TokenStre
     } else {
         log::debug!("macro finished successfully");
     }
-
     result
 }
 

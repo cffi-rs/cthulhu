@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::fmt::{self, Debug};
+use std::path::Path;
 use syn::punctuated::Punctuated;
 
 use crate::attr::{marshal::MarshalAttr, Mapping};
@@ -96,6 +97,7 @@ impl Debug for InnerFn {
 #[allow(dead_code)]
 pub struct Function {
     name: syn::Ident,
+    original_params: Punctuated<syn::FnArg, syn::Token![,]>,
     foreign_params: Punctuated<syn::PatType, syn::Token![,]>,
     foreign_args: Punctuated<syn::Pat, syn::Token![,]>,
     return_type: ReturnType,
@@ -111,6 +113,7 @@ impl std::fmt::Debug for Function {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         let Function {
             name,
+            original_params,
             foreign_params,
             foreign_args,
             from_foreigns,
@@ -119,6 +122,10 @@ impl std::fmt::Debug for Function {
 
         fmt.debug_struct("Function")
             .field("name", &format!("{}", quote! { #name }))
+            .field(
+                "original_params",
+                &format!("{}", quote! { #original_params }),
+            )
             .field("foreign_params", &format!("{}", quote! { #foreign_params }))
             .field("foreign_args", &format!("{}", quote! { #foreign_args }))
             .field("return_type", &self.return_type)
@@ -193,23 +200,41 @@ impl PatExt for syn::Pat {
 }
 
 mod c {
+    use std::borrow::Cow;
+
+    use crate::is_passthrough_type;
+
     use super::*;
 
-    fn c_type(ty: Option<syn::Type>) -> &'static str {
-        match ty {
-            Some(ty) => {
-                match ty.pointer_type() {
-                    Some(PtrType::Const) => "const void*",
-                    Some(PtrType::Mut) => "void*",
-                    None => {
-                        // passthrough types
-                        // TODO
-                        "TODO"
-                    }
-                }
+    fn c_type(ty: Option<syn::Type>) -> Cow<'static, str> {
+        if let Some(ty) = ty {
+            // if is_passthrough_type(&ty) {
+            //     match ty {
+            //         syn::Type::Path(x) => {
+            //         }
+            //         _ => return Cow::Borrowed("TODO(passthrough type)"),
+            //     }
+            // }
+
+            match ty.pointer_type() {
+                Some(PtrType::Const) => return Cow::Borrowed("const void*"),
+                Some(PtrType::Mut) => return Cow::Borrowed("void*"),
+                None => {}
             }
-            None => "void",
+
+            match &ty {
+                syn::Type::Path(x) => {
+                    if is_passthrough_type(&ty) {
+                        return Cow::Owned(x.path.get_ident().unwrap().to_string());
+                    }
+                    return Cow::Owned(format!("struct {}", x.path.segments.last().unwrap().ident));
+                }
+                syn::Type::Verbatim(x) => unreachable!("wtf"),
+                _ => todo!(),
+            }
         }
+
+        Cow::Borrowed("void")
     }
 
     pub fn to_string(function: &Function) -> String {
@@ -232,9 +257,10 @@ mod c {
             .collect::<Vec<_>>()
             .join(", ");
 
-        log::debug!("{} {}({});", return_type, function.name, params);
-
-        return_type.to_string()
+        format!(
+            "extern {} {}({}); \n{:#?}",
+            return_type, function.name, params, function
+        )
     }
 }
 
@@ -265,6 +291,7 @@ impl Function {
         let mut has_exceptions = false;
 
         for (i, param) in params.iter().enumerate() {
+            log::debug!("{i} {:?}", param);
             let mapping = &mappings[i];
             let out_type = &mapping.output_type;
             let _marshaler = &mapping.marshaler;
@@ -282,6 +309,7 @@ impl Function {
             // }
             if let Some(marshaler) = mapping.marshaler.as_ref() {
                 let path = &marshaler.path;
+                assert!(path.segments.len() > 0);
                 let is_trait_object = marshaler
                     .first_type()
                     .map(|x| is_trait_object(&x))
@@ -314,7 +342,7 @@ impl Function {
 
                 let box_marshaler = MarshalAttr {
                     path: syn::parse2(quote! { ::cffi::BoxMarshaler::<#out_type> })?,
-                    types: vec![],
+                    types: vec![out_type.clone()],
                 };
                 let foreign = gen_foreign(
                     &box_marshaler,
@@ -348,6 +376,7 @@ impl Function {
 
         let function = Function {
             name,
+            original_params: params,
             foreign_params,
             foreign_args,
             return_type,
@@ -359,7 +388,15 @@ impl Function {
             has_callback,
         };
 
-        c::to_string(&function);
+        // let cffi_path = Path::new(&std::env::var("OUT_DIR").unwrap()).join("../../../cffi");
+        // std::fs::create_dir_all(&cffi_path).unwrap();
+        // std::fs::write(
+        //     &cffi_path
+        //         .join(function.name.to_string())
+        //         .with_extension("h"),
+        //     c::to_string(&function),
+        // )
+        // .unwrap();
 
         // if crate::is_exporting() {
         //     use fd_lock::{FdLock, FdLockGuard};
@@ -394,6 +431,7 @@ impl Function {
             Some(if crate::is_passthrough_type(&ty) {
                 quote! { #ty }
             } else {
+                log::debug!("what the fuck? {:?}", self.fn_marshal_attr);
                 let return_marshaler = match ty.resolve_marshaler(self.fn_marshal_attr.as_ref()) {
                     Some(v) => v,
                     None => {
